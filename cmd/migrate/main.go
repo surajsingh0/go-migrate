@@ -8,7 +8,7 @@ import (
 	"os"
 
 	_ "github.com/lib/pq"
-	"github.com/surajsingh0/go-migrate/migrations"
+	"github.com/surajsingh0/go-migrate-easy/migrations"
 )
 
 func main() {

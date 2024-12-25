@@ -1,4 +1,4 @@
-module github.com/surajsingh0/go-migrate
+module github.com/surajsingh0/go-migrate-easy
 
 go 1.23.0
 
