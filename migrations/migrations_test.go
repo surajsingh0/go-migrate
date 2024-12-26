@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -312,6 +313,134 @@ func TestGetAppliedMigrations(t *testing.T) {
 				if timestamp.After(time.Now()) {
 					t.Error("Migration timestamp should not be in the future")
 				}
+			}
+		})
+	}
+}
+
+func TestParseMigrationFilename(t *testing.T) {
+	tests := []struct {
+		name           string
+		filename       string
+		wantVersion    int
+		wantName       string
+		wantDirection  string
+		wantErr        bool
+		expectedErrMsg string
+	}{
+		{
+			name:          "valid up migration",
+			filename:      "001_create_users_up.sql",
+			wantVersion:   1,
+			wantName:      "create_users",
+			wantDirection: "up",
+			wantErr:       false,
+		},
+		{
+			name:          "valid down migration",
+			filename:      "002_add_email_down.sql",
+			wantVersion:   2,
+			wantName:      "add_email",
+			wantDirection: "down",
+			wantErr:       false,
+		},
+		{
+			name:          "valid complex name",
+			filename:      "003_create_user_posts_comments_up.sql",
+			wantVersion:   3,
+			wantName:      "create_user_posts_comments",
+			wantDirection: "up",
+			wantErr:       false,
+		},
+		{
+			name:          "valid large version number",
+			filename:      "999_final_migration_down.sql",
+			wantVersion:   999,
+			wantName:      "final_migration",
+			wantDirection: "down",
+			wantErr:       false,
+		},
+		{
+			name:           "invalid extension",
+			filename:       "001_create_users_up.txt",
+			wantErr:        true,
+			expectedErrMsg: "file must have .sql extension",
+		},
+		{
+			name:           "missing parts",
+			filename:       "001_up.sql",
+			wantErr:        true,
+			expectedErrMsg: "filename must have at least version, name, and direction parts",
+		},
+		{
+			name:           "invalid version",
+			filename:       "abc_create_users_up.sql",
+			wantErr:        true,
+			expectedErrMsg: "invalid version number",
+		},
+		{
+			name:           "invalid direction",
+			filename:       "001_create_users_invalid.sql",
+			wantErr:        true,
+			expectedErrMsg: "direction must be 'up' or 'down'",
+		},
+		{
+			name:           "empty name",
+			filename:       "001__up.sql",
+			wantErr:        true,
+			expectedErrMsg: "name part cannot be empty",
+		},
+		{
+			name:           "no extension",
+			filename:       "001_create_users_up",
+			wantErr:        true,
+			expectedErrMsg: "file must have .sql extension",
+		},
+		{
+			name:           "empty filename",
+			filename:       "",
+			wantErr:        true,
+			expectedErrMsg: "file must have .sql extension",
+		},
+		{
+			name:          "complex multi-underscore name",
+			filename:      "012_create_new_new_create_something_doing_here_up.sql",
+			wantVersion:   12,
+			wantName:      "create_new_new_create_something_doing_here",
+			wantDirection: "up",
+			wantErr:       false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			m := &Migrator{}
+			gotVersion, gotName, gotDirection, err := m.parseMigrationFilename(tt.filename)
+
+			if tt.wantErr {
+				if err == nil {
+					t.Errorf("parseMigrationFilename() error = nil, wanted error containing %q", tt.expectedErrMsg)
+					return
+				}
+				if !strings.Contains(err.Error(), tt.expectedErrMsg) {
+					t.Errorf("parseMigrationFilename() error = %v, wanted error containing %q", err, tt.expectedErrMsg)
+				}
+				return
+			}
+
+			if err != nil {
+				t.Errorf("parseMigrationFilename() unexpected error = %v", err)
+				return
+			}
+
+			if gotVersion != tt.wantVersion {
+				t.Errorf("parseMigrationFilename() gotVersion = %v, want %v", gotVersion, tt.wantVersion)
+			}
+			if gotName != tt.wantName {
+				t.Errorf("parseMigrationFilename() gotName = %v, want %v", gotName, tt.wantName)
+			}
+			if gotDirection != tt.wantDirection {
+				t.Errorf("parseMigrationFilename() gotDirection = %v, want %v", gotDirection, tt.wantDirection)
 			}
 		})
 	}
