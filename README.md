@@ -1,24 +1,58 @@
 # Go-Migrate-Easy
 
-A simple, robust database migration library for Go applications. This library provides both a programmatic API and CLI tool for managing database migrations.
+A simple, robust database migration package/library and CLI tool. Designed for seamless integration with Go applications through a programmatic API, the CLI tool also allows developers using any language or framework to manage database migrations effortlessly across multiple database types.
 
 ## Features
 
 - ✨ Simple API for programmatic use
-- 🛠 CLI tool for manual migration management
+- 🛠 CLI tool for use with any programming language or framework
 - 📦 Automatic version tracking
 - ⚡ Transaction support
 - 🔄 Up/Down migrations
 - 🚀 Easy to integrate
 - 📝 Descriptive logging
+- 🔌 Multiple database support (PostgreSQL, MySQL, SQLite)
 
 ## Installation
 
+### Binary Installation
+
 ```bash
+# Using go install
+go install github.com/surajsingh0/go-migrate-easy/cmd/migrate@latest
+
+# From source
+git clone https://github.com/surajsingh0/go-migrate-easy.git
+cd go-migrate-easy
+go build -o migrate cmd/migrate/main.go
+```
+
+### Library Installation
+
+```bash
+# Install the library
 go get github.com/surajsingh0/go-migrate-easy
+
+# Install database drivers as needed
+go get github.com/lib/pq             # PostgreSQL
+go get github.com/go-sql-driver/mysql # MySQL
+go get github.com/mattn/go-sqlite3    # SQLite
 ```
 
 ## CLI Usage
+
+### Database Connection URLs
+
+```bash
+# PostgreSQL
+migrate -db="postgres://user:pass@localhost:5432/dbname"
+
+# MySQL
+migrate -db="mysql://user:pass@localhost:3306/dbname"
+
+# SQLite
+migrate -db="sqlite:///path/to/database.db"
+```
 
 ### Creating a New Migration
 
@@ -34,15 +68,29 @@ migrate -db="postgres://user:pass@localhost:5432/dbname" -command=create -name=c
 ### Writing Migrations
 
 ```sql
+-- PostgreSQL Example
 -- migrations/001_create_users_up.sql
 CREATE TABLE users (
     id SERIAL PRIMARY KEY,
     username VARCHAR(100) NOT NULL,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+);
+
+-- MySQL Example
+-- migrations/001_create_users_up.sql
+CREATE TABLE users (
+    id INTEGER PRIMARY KEY AUTO_INCREMENT,
+    username VARCHAR(100) NOT NULL,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
--- migrations/001_create_users_down.sql
-DROP TABLE users;
+-- SQLite Example
+-- migrations/001_create_users_up.sql
+CREATE TABLE users (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    username TEXT NOT NULL,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
 ```
 
 ### Running Migrations
@@ -79,19 +127,27 @@ import (
     "log"
     
     "github.com/surajsingh0/go-migrate-easy/migrations"
-    _ "github.com/lib/pq"
+    _ "github.com/lib/pq"           // PostgreSQL driver
+    _ "github.com/go-sql-driver/mysql" // MySQL driver
+    _ "github.com/mattn/go-sqlite3"    // SQLite driver
 )
 
 func main() {
-    // Connect to database
+    // Connect to database (choose appropriate driver and URL)
     db, err := sql.Open("postgres", "postgres://user:pass@localhost:5432/dbname")
+    // OR for MySQL:
+    // db, err := sql.Open("mysql", "user:pass@tcp(localhost:3306)/dbname")
+    // OR for SQLite:
+    // db, err := sql.Open("sqlite3", "./database.db")
     if err != nil {
         log.Fatal(err)
     }
     defer db.Close()
 
-    // Create migrator
-    migrator := migrations.New(db, "migrations")
+    // Create migrator with database type
+    migrator := migrations.New(db, "migrations", migrations.Config{
+        DatabaseType: "postgres", // or "mysql" or "sqlite3"
+    })
 
     // Initialize migrations table
     if err := migrator.Init(); err != nil {
@@ -122,13 +178,16 @@ import (
 )
 
 func main() {
+    // Connect to your preferred database
     db, err := sql.Open("postgres", "postgres://user:pass@localhost:5432/dbname")
     if err != nil {
         log.Fatal(err)
     }
     defer db.Close()
 
-    migrator := migrations.New(db, "migrations")
+    migrator := migrations.New(db, "migrations", migrations.Config{
+        DatabaseType: "postgres",
+    })
 
     // Initialize
     if err := migrator.Init(); err != nil {
@@ -153,6 +212,23 @@ func main() {
 }
 ```
 
+## Database-Specific Considerations
+
+### PostgreSQL
+- Uses `$1, $2, ...` for query parameters
+- Supports `TIMESTAMP WITH TIME ZONE`
+- Uses `SERIAL` for auto-incrementing IDs
+
+### MySQL
+- Uses `?` for query parameters
+- Default timestamp is `TIMESTAMP`
+- Uses `AUTO_INCREMENT` for auto-incrementing IDs
+
+### SQLite
+- Uses `?` for query parameters
+- Uses `AUTOINCREMENT` for auto-incrementing IDs
+- Some constraints and types may differ
+
 ## Migration File Format
 
 Migration files should follow this naming convention:
@@ -168,66 +244,81 @@ Examples:
 
 ## Best Practices
 
-1. **Always Include Down Migrations**
+1. **Database Compatibility**
+   - Test migrations on all supported databases
+   - Use database-specific features carefully
+   - Consider using common SQL features when possible
+
+2. **Always Include Down Migrations**
    - Make sure each migration has both up and down SQL
    - Test both directions before committing
 
-2. **Keep Migrations Small**
+3. **Keep Migrations Small**
    - One logical change per migration
    - Easier to debug and rollback
 
-3. **Use Transactions**
+4. **Use Transactions**
    - The library handles transactions automatically
    - Ensures database consistency
 
-4. **Version Control**
+5. **Version Control**
    - Commit migrations with your code
    - Never modify existing migrations
    - Create new migrations for changes
 
-5. **Testing**
+6. **Testing**
    - Test migrations on development database first
    - Include sample data in tests
+   - Test across all supported databases
 
 ## Common Scenarios
 
 ### Adding a New Table
 
 ```sql
--- 001_create_users_up.sql
+-- PostgreSQL
 CREATE TABLE users (
     id SERIAL PRIMARY KEY,
     username VARCHAR(100) NOT NULL
 );
 
--- 001_create_users_down.sql
-DROP TABLE users;
+-- MySQL
+CREATE TABLE users (
+    id INTEGER PRIMARY KEY AUTO_INCREMENT,
+    username VARCHAR(100) NOT NULL
+);
+
+-- SQLite
+CREATE TABLE users (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    username TEXT NOT NULL
+);
 ```
 
 ### Adding a Column
 
 ```sql
--- 002_add_email_up.sql
+-- Works across all supported databases
 ALTER TABLE users
 ADD COLUMN email VARCHAR(255);
-
--- 002_add_email_down.sql
-ALTER TABLE users
-DROP COLUMN email;
 ```
 
 ### Adding a Foreign Key
 
 ```sql
--- 003_create_posts_up.sql
+-- PostgreSQL and MySQL
 CREATE TABLE posts (
     id SERIAL PRIMARY KEY,
     user_id INTEGER REFERENCES users(id),
     title VARCHAR(255) NOT NULL
 );
 
--- 003_create_posts_down.sql
-DROP TABLE posts;
+-- SQLite
+CREATE TABLE posts (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id INTEGER REFERENCES users(id),
+    title TEXT NOT NULL
+);
 ```
 
 ## Contributing
