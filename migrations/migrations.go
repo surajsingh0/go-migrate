@@ -11,6 +11,10 @@ import (
 	"time"
 )
 
+type Config struct {
+	DatabaseType string
+}
+
 // Migration represents a single database migration
 type Migration struct {
 	Version   int
@@ -24,26 +28,71 @@ type Migration struct {
 type Migrator struct {
 	db            *sql.DB
 	migrationsDir string
+	config        Config
 	migrations    []*Migration
 }
 
-func New(db *sql.DB, migrationsDir string) *Migrator {
+// dbDialect encapsulates database-specific behaviors
+type dbDialect struct {
+	createTableSQL string
+	placeholder    func(int) string
+}
+
+// getDialect returns the appropriate dialect for the database type
+func getDialect(dbType string) (*dbDialect, error) {
+	dialects := map[string]dbDialect{
+		"postgres": {
+			createTableSQL: `
+				CREATE TABLE IF NOT EXISTS schema_migrations (
+					version INTEGER PRIMARY KEY,
+					name TEXT NOT NULL,
+					applied_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+				)`,
+			placeholder: func(i int) string { return fmt.Sprintf("$%d", i) },
+		},
+		"mysql": {
+			createTableSQL: `
+				CREATE TABLE IF NOT EXISTS schema_migrations (
+					version INTEGER PRIMARY KEY,
+					name VARCHAR(255) NOT NULL,
+					applied_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+				)`,
+			placeholder: func(i int) string { return "?" },
+		},
+		"sqlite3": {
+			createTableSQL: `
+				CREATE TABLE IF NOT EXISTS schema_migrations (
+					version INTEGER PRIMARY KEY,
+					name TEXT NOT NULL,
+					applied_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+				)`,
+			placeholder: func(i int) string { return "?" },
+		},
+	}
+
+	dialect, ok := dialects[dbType]
+	if !ok {
+		return nil, fmt.Errorf("unsupported database type: %s", dbType)
+	}
+	return &dialect, nil
+}
+
+func New(db *sql.DB, migrationsDir string, config Config) *Migrator {
 	return &Migrator{
 		db:            db,
 		migrationsDir: migrationsDir,
+		config:        config,
 	}
 }
 
 // Init creates the migrations table if it doesn't exist
 func (m *Migrator) Init() error {
-	query := `
-        CREATE TABLE IF NOT EXISTS schema_migrations (
-            version INTEGER PRIMARY KEY,
-            name TEXT NOT NULL,
-            applied_at TIMESTAMP NOT NULL
-        );
-    `
-	_, err := m.db.Exec(query)
+	dialect, err := getDialect(m.config.DatabaseType)
+	if err != nil {
+		return err
+	}
+
+	_, err = m.db.Exec(dialect.createTableSQL)
 	return err
 }
 
@@ -119,6 +168,11 @@ func (m *Migrator) GetAppliedMigrations() (map[int]time.Time, error) {
 
 // Migrate runs all pending migrations
 func (m *Migrator) Migrate() error {
+	dialect, err := getDialect(m.config.DatabaseType)
+	if err != nil {
+		return err
+	}
+
 	applied, err := m.GetAppliedMigrations()
 	if err != nil {
 		return err
@@ -139,13 +193,15 @@ func (m *Migrator) Migrate() error {
 				return fmt.Errorf("failed to apply migration %d: %v", migration.Version, err)
 			}
 
-			// Record migration
-			_, err = tx.Exec(
-				"INSERT INTO schema_migrations (version, name, applied_at) VALUES ($1, $2, $3)",
-				migration.Version,
-				migration.Name,
-				time.Now(),
+			// Record migration using database-specific placeholders
+			insertSQL := fmt.Sprintf(
+				"INSERT INTO schema_migrations (version, name, applied_at) VALUES (%s, %s, %s)",
+				dialect.placeholder(1),
+				dialect.placeholder(2),
+				dialect.placeholder(3),
 			)
+
+			_, err = tx.Exec(insertSQL, migration.Version, migration.Name, time.Now())
 			if err != nil {
 				tx.Rollback()
 				return fmt.Errorf("failed to record migration %d: %v", migration.Version, err)
@@ -165,6 +221,11 @@ func (m *Migrator) Migrate() error {
 
 // Rollback reverts the last applied migration
 func (m *Migrator) Rollback() error {
+	dialect, err := getDialect(m.config.DatabaseType)
+	if err != nil {
+		return err
+	}
+
 	applied, err := m.GetAppliedMigrations()
 	if err != nil {
 		return err
@@ -209,8 +270,9 @@ func (m *Migrator) Rollback() error {
 		return fmt.Errorf("failed to rollback migration %d: %v", lastVersion, err)
 	}
 
-	// Remove migration record
-	if _, err := tx.Exec("DELETE FROM schema_migrations WHERE version = $1", lastVersion); err != nil {
+	// Remove migration record using database-specific placeholder
+	deleteSQL := fmt.Sprintf("DELETE FROM schema_migrations WHERE version = %s", dialect.placeholder(1))
+	if _, err := tx.Exec(deleteSQL, lastVersion); err != nil {
 		tx.Rollback()
 		return fmt.Errorf("failed to remove migration record %d: %v", lastVersion, err)
 	}
