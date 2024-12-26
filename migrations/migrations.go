@@ -106,10 +106,11 @@ func (m *Migrator) LoadMigrations() error {
 	// Group up and down files
 	migrationFiles := make(map[int]map[string]string)
 	for _, file := range files {
+		fmt.Println(file.Name(), strings.HasSuffix(file.Name(), ".sql"))
 		if strings.HasSuffix(file.Name(), ".sql") {
 			var version int
-			var name, direction string
-			_, err := fmt.Sscanf(file.Name(), "%d_%s_%s.sql", &version, &name, &direction)
+			var _, direction string
+			version, _, direction, err := m.parseMigrationFilename(file.Name())
 			if err != nil {
 				continue
 			}
@@ -284,4 +285,32 @@ func (m *Migrator) Rollback() error {
 
 	fmt.Printf("Rolled back migration %d: %s\n", migration.Version, migration.Name)
 	return nil
+}
+
+func (m *Migrator) parseMigrationFilename(filename string) (version int, name, direction string, err error) {
+	if !strings.HasSuffix(filename, ".sql") {
+		return 0, "", "", fmt.Errorf("file must have .sql extension")
+	}
+
+	parts := strings.Split(strings.TrimSuffix(filename, ".sql"), "_")
+	if len(parts) < 3 {
+		return 0, "", "", fmt.Errorf("filename must have at least version, name, and direction parts")
+	}
+
+	_, err = fmt.Sscanf(parts[0], "%d", &version)
+	if err != nil {
+		return 0, "", "", fmt.Errorf("invalid version number: %v", err)
+	}
+
+	direction = parts[len(parts)-1]
+	if direction != "up" && direction != "down" {
+		return 0, "", "", fmt.Errorf("direction must be 'up' or 'down'")
+	}
+
+	name = strings.Join(parts[1:len(parts)-1], "_")
+	if name == "" {
+		return 0, "", "", fmt.Errorf("name part cannot be empty")
+	}
+
+	return version, name, direction, nil
 }
