@@ -8,7 +8,7 @@ A simple, robust database migration package/library and CLI tool. Designed for s
 - 🛠 CLI tool for use with any programming language or framework
 - 📦 Automatic version tracking
 - ⚡ Transaction support
-- 🔄 Up/Down migrations
+- 🔄 Up/Down migrations with multi-step rollback support
 - 🚀 Easy to integrate
 - 📝 Descriptive logging
 - 🔌 Multiple database support (PostgreSQL, MySQL, SQLite)
@@ -99,8 +99,11 @@ CREATE TABLE users (
 # Apply all pending migrations
 migrate -db="postgres://user:pass@localhost:5432/dbname" -command=up
 
-# Rollback last migration
+# Rollback the last migration (default steps = 1)
 migrate -db="postgres://user:pass@localhost:5432/dbname" -command=down
+
+# Rollback multiple migrations (e.g. rollback last 2 migrations)
+migrate -db="postgres://user:pass@localhost:5432/dbname" -command=down -steps=2
 ```
 
 ### CLI Options
@@ -113,6 +116,7 @@ Options:
   -dir string      Migrations directory (default "migrations")
   -command string  Command to run (up, down, create)
   -name string     Migration name (required for create)
+  -steps int       (Optional for down command) Number of migrations to rollback (default is 1)
 ```
 
 ## Programmatic Usage
@@ -127,7 +131,7 @@ import (
     "log"
     
     "github.com/surajsingh0/go-migrate-easy/migrations"
-    _ "github.com/lib/pq"           // PostgreSQL driver
+    _ "github.com/lib/pq"             // PostgreSQL driver
     _ "github.com/go-sql-driver/mysql" // MySQL driver
     _ "github.com/mattn/go-sqlite3"    // SQLite driver
 )
@@ -135,10 +139,6 @@ import (
 func main() {
     // Connect to database (choose appropriate driver and URL)
     db, err := sql.Open("postgres", "postgres://user:pass@localhost:5432/dbname")
-    // OR for MySQL:
-    // db, err := sql.Open("mysql", "user:pass@tcp(localhost:3306)/dbname")
-    // OR for SQLite:
-    // db, err := sql.Open("sqlite3", "./database.db")
     if err != nil {
         log.Fatal(err)
     }
@@ -200,13 +200,13 @@ func main() {
         log.Fatal(err)
     }
 
-    // Check if specific migration is applied
+    // Check if a specific migration is applied
     if _, ok := applied[1]; ok {
         log.Println("Migration 1 is applied")
     }
 
-    // Rollback last migration
-    if err := migrator.Rollback(); err != nil {
+    // Rollback the last migration (or specify the number of steps)
+    if err := migrator.Rollback(1); err != nil {
         log.Fatal(err)
     }
 }
