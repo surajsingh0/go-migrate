@@ -220,8 +220,13 @@ func (m *Migrator) Migrate() error {
 	return nil
 }
 
-// Rollback reverts the last applied migration
-func (m *Migrator) Rollback() error {
+// Rollback reverts the last `steps` applied migrations in a single transaction.
+// If steps is less than 1, it defaults to 1.
+func (m *Migrator) Rollback(steps int) error {
+	if steps < 1 {
+		steps = 1
+	}
+
 	dialect, err := getDialect(m.config.DatabaseType)
 	if err != nil {
 		return err
@@ -236,55 +241,53 @@ func (m *Migrator) Rollback() error {
 		return errors.New("no migrations to rollback")
 	}
 
-	// Find last applied migration
-	var lastVersion int
-	var lastAppliedAt time.Time
-	for version, appliedAt := range applied {
-		if appliedAt.After(lastAppliedAt) {
-			lastVersion = version
-			lastAppliedAt = appliedAt
+	// Build a list of applied migrations along with their applied times.
+	type appliedMigration struct {
+		migration *Migration
+		appliedAt time.Time
+	}
+	var appliedList []appliedMigration
+	for _, migration := range m.migrations {
+		if appliedAt, ok := applied[migration.Version]; ok {
+			appliedList = append(appliedList, appliedMigration{
+				migration: migration,
+				appliedAt: appliedAt,
+			})
 		}
 	}
 
-	// Find migration object
-	var migration *Migration
-	for _, m := range m.migrations {
-		if m.Version == lastVersion {
-			migration = m
-			break
-		}
+	// Sort by applied time descending (most recent first).
+	sort.Slice(appliedList, func(i, j int) bool {
+		return appliedList[i].appliedAt.After(appliedList[j].appliedAt)
+	})
+
+	// Adjust steps if more than available.
+	if steps > len(appliedList) {
+		steps = len(appliedList)
 	}
 
-	if migration == nil {
-		return fmt.Errorf("migration %d not found", lastVersion)
+	var migrationsToRollback []*Migration
+	for i := 0; i < steps; i++ {
+		migrationsToRollback = append(migrationsToRollback, appliedList[i].migration)
 	}
 
-	// Start transaction
 	tx, err := m.db.Begin()
 	if err != nil {
 		return err
 	}
-
-	// Revert migration
-	if _, err := tx.Exec(migration.DownSQL); err != nil {
-		tx.Rollback()
-		return fmt.Errorf("failed to rollback migration %d: %v", lastVersion, err)
+	for _, migration := range migrationsToRollback {
+		if _, err := tx.Exec(migration.DownSQL); err != nil {
+			tx.Rollback()
+			return fmt.Errorf("failed to rollback migration %d: %v", migration.Version, err)
+		}
+		deleteSQL := fmt.Sprintf("DELETE FROM schema_migrations WHERE version = %s", dialect.placeholder(1))
+		if _, err := tx.Exec(deleteSQL, migration.Version); err != nil {
+			tx.Rollback()
+			return fmt.Errorf("failed to remove migration record %d: %v", migration.Version, err)
+		}
+		fmt.Printf("Rolled back migration %d: %s\n", migration.Version, migration.Name)
 	}
-
-	// Remove migration record using database-specific placeholder
-	deleteSQL := fmt.Sprintf("DELETE FROM schema_migrations WHERE version = %s", dialect.placeholder(1))
-	if _, err := tx.Exec(deleteSQL, lastVersion); err != nil {
-		tx.Rollback()
-		return fmt.Errorf("failed to remove migration record %d: %v", lastVersion, err)
-	}
-
-	// Commit transaction
-	if err := tx.Commit(); err != nil {
-		return err
-	}
-
-	fmt.Printf("Rolled back migration %d: %s\n", migration.Version, migration.Name)
-	return nil
+	return tx.Commit()
 }
 
 func (m *Migrator) parseMigrationFilename(filename string) (version int, name, direction string, err error) {

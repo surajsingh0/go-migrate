@@ -17,26 +17,24 @@ func main() {
 	migrationsDir := flag.String("dir", "migrations", "Migrations directory")
 	command := flag.String("command", "up", "Command to run (up, down, create)")
 	name := flag.String("name", "", "Migration name (required for create)")
+	steps := flag.Int("steps", 1, "Number of migrations to rollback (only used with 'down' command)")
 	flag.Parse()
 
 	if *dbURL == "" {
 		log.Fatal("Database URL is required")
 	}
 
-	// Parse database configuration
 	dbConfig, err := ParseDBURL(*dbURL)
 	if err != nil {
 		log.Fatal(err)
 	}
 
-	// Initialize database connection
 	db, err := initializeDB(dbConfig)
 	if err != nil {
 		log.Fatal(err)
 	}
 	defer db.Close()
 
-	// Create migrator with database-specific configuration
 	migrator := migrations.New(db, *migrationsDir, migrations.Config{
 		DatabaseType: dbConfig.Type,
 		// Add any database-specific configuration here
@@ -58,10 +56,10 @@ func main() {
 		fmt.Println("Migrations completed successfully")
 
 	case "down":
-		if err := migrator.Rollback(); err != nil {
+		if err := migrator.Rollback(*steps); err != nil {
 			log.Fatal(err)
 		}
-		fmt.Println("Rollback completed successfully")
+		fmt.Printf("Rollback of %d migration(s) completed successfully\n", *steps)
 
 	case "create":
 		if *name == "" {
